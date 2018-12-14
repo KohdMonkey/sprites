@@ -1,9 +1,9 @@
-pragma solidity ^0.4.3;
+pragma solidity >0.4.99 <0.6.0;
 
 // External interface
 contract PreimageManager {
-    function submitPreimage(bytes32 x) {}
-    function revealedBefore(bytes32 h, uint T) returns(bool) {}
+    function submitPreimage(bytes32 x) external {}
+    function revealedBefore(bytes32 h, uint T) external returns(bool) {}
 }
 
 // Note: Initial version does NOT support concurrent conditional payments!
@@ -20,14 +20,14 @@ contract SpriteChannel {
     event EventPending(uint T1, uint T2);
 
     // Utility functions
-    modifier after_ (uint T) { if (T > 0 && block.number >= T) _; else throw; }
-    modifier before(uint T) { if (T == 0 || block.number <  T) _; else throw; }
-    modifier onlyplayers { if (playermap[msg.sender] > 0) _; else throw; }
-    function assert(bool b) internal { if (!b) throw; }
+    modifier after_ (uint T) { if (T > 0 && block.number >= T) _; else revert(); }
+    modifier before(uint T) { if (T == 0 || block.number <  T) _; else revert(); }
+    modifier onlyplayers { if (playermap[msg.sender] > 0) _; else revert(); }
+    function assert(bool b) internal { if (!b) revert(); }
     function max(uint a, uint b) internal returns(uint) { if (a>b) return a; else return b; }
     function min(uint a, uint b) internal returns(uint) { if (a<b) return a; else return b; }
-    function verifySignature(address pub, bytes32 h, uint8 v, bytes32 r, bytes32 s) {
-        if (pub != ecrecover(h,v,r,s)) throw;
+    function verifySignature(address pub, bytes32 h, uint8 v, bytes32 r, bytes32 s) public {
+        if (pub != ecrecover(h,v,r,s)) revert();
     }
 
     ///////////////////////////////
@@ -61,26 +61,26 @@ contract SpriteChannel {
     uint[2] public deposits; // Monotonic, only incremented by deposit() function
     uint[2] public withdrawn; // Monotonic, only incremented by withdraw() function
 
-    function sha3int(int r) constant returns(bytes32) {
-	return sha3(r);
+    function sha3int(int r) public view returns(bytes32) {
+    	return keccak256(abi.encodePacked(r));
     }
 
-    function SpriteChannel(PreimageManager _pm, address[2] _players) {
+    constructor (PreimageManager _pm, address[2] memory _players) public {
 	pm = _pm;
         for (uint i = 0; i < 2; i++) {
             players[i] = _players[i];
             playermap[_players[i]] = i + 1;
         }
-        EventInit();
+        emit EventInit();
     }
 
     // Increment on new deposit
-    function deposit() payable onlyplayers {
+    function deposit() public payable onlyplayers {
 	deposits[playermap[msg.sender]-1] += msg.value;
     }
 
     // Increment on withdrawal
-    function withdraw() onlyplayers {
+    function withdraw() public onlyplayers {
 	uint i = playermap[msg.sender]-1;
 	uint toWithdraw = withdrawals[i] - withdrawn[i];
 	withdrawn[i] = withdrawals[i];
@@ -88,8 +88,8 @@ contract SpriteChannel {
     }
 
     // State channel update function
-    function update(uint[3] sig, int r, int[2] _credits, uint[2] _withdrawals,
-		    bytes32 _hash, uint _expiry, uint _amount)
+    function update(uint[3] memory sig, int r, int[2] memory _credits, uint[2] memory _withdrawals,
+		    bytes32 _hash, uint _expiry, uint _amount) public
     onlyplayers {
 	
         // Only update to states with larger round number
@@ -97,10 +97,10 @@ contract SpriteChannel {
 
         // Check the signature of the other party
 	uint i = (3 - playermap[msg.sender]) - 1;
-        var _h = sha3(r, _credits, _withdrawals, _hash, _expiry, _amount);
-	var V =  uint8 (sig[0]);
-	var R = bytes32(sig[1]);
-	var S = bytes32(sig[2]);
+    bytes32 _h = keccak256(abi.encodePacked(r, _credits, _withdrawals, _hash, _expiry, _amount));
+	uint8 V =  uint8 (sig[0]);
+	bytes32 R = bytes32(sig[1]);
+	bytes32 S = bytes32(sig[2]);
 	verifySignature(players[i], _h, V, R, S);
 
 	// Update the state
@@ -112,18 +112,18 @@ contract SpriteChannel {
 	hash = _hash;
 	expiry = _expiry;
 	bestRound = r;
-        EventUpdate(r);
+        emit EventUpdate(r);
     }
 
     // Causes a timeout for the finalize time
-    function trigger() onlyplayers {
+    function trigger() public  onlyplayers {
 	assert( status == Status.OK );
 	status = Status.PENDING;
 	deadline = block.number + DELTA; // Set the deadline for collecting inputs or updates
-        EventPending(block.number, deadline);
+        emit EventPending(block.number, deadline);
     }
     
-    function finalize() {
+    function finalize() public {
 	assert( status == Status.PENDING );
 	assert( block.number > deadline );
 
